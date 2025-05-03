@@ -1,4 +1,4 @@
-//! Implementation of [`MapArea`] and [`MemorySet`].
+//! [`MapArea`] 和 [`MemorySet`] 的实现。
 
 use super::{frame_alloc, FrameTracker};
 use super::{PTEFlags, PageTable, PageTableEntry};
@@ -15,43 +15,45 @@ use core::arch::asm;
 use lazy_static::*;
 use riscv::register::satp;
 
+// 声明外部符号,用于获取内核各段的位置
 extern "C" {
-    fn stext();
-    fn etext();
-    fn srodata();
-    fn erodata();
-    fn sdata();
-    fn edata();
-    fn sbss_with_stack();
-    fn ebss();
-    fn ekernel();
-    fn strampoline();
+    fn stext();     // .text段的起始位置
+    fn etext();     // .text段的结束位置
+    fn srodata();   // .rodata段的起始位置
+    fn erodata();   // .rodata段的结束位置
+    fn sdata();     // .data段的起始位置
+    fn edata();     // .data段的结束位置
+    fn sbss_with_stack();  // .bss段(包含内核栈)的起始位置
+    fn ebss();      // .bss段的结束位置
+    fn ekernel();   // 整个内核的结束位置
+    fn strampoline(); // 跳板的起始位置
 }
 
 lazy_static! {
-    /// The kernel's initial memory mapping(kernel address space)
+    /// 内核的初始内存映射(内核地址空间)
     pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
 }
-/// address space
+
+/// 地址空间
 pub struct MemorySet {
-    page_table: PageTable,
-    areas: Vec<MapArea>,
+    page_table: PageTable,  // 页表
+    areas: Vec<MapArea>,    // 一系列有关联的映射区域
 }
 
 impl MemorySet {
-    /// Create a new empty `MemorySet`.
+    /// 创建一个空的地址空间
     pub fn new_bare() -> Self {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
         }
     }
-    /// Get the page table token
+    /// 获取页表的token
     pub fn token(&self) -> usize {
         self.page_table.token()
     }
-    /// Assume that no conflicts.
+    /// 插入一个新的映射区域，假定不存在冲突
     pub fn insert_framed_area(
         &mut self,
         start_va: VirtAddr,
@@ -63,6 +65,7 @@ impl MemorySet {
             None,
         );
     }
+    /// 添加一个新的映射区域
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
@@ -70,7 +73,7 @@ impl MemorySet {
         }
         self.areas.push(map_area);
     }
-    /// Mention that trampoline is not collected by areas.
+    /// 映射跳板，注意跳板不会被areas收集
     fn map_trampoline(&mut self) {
         self.page_table.map(
             VirtAddr::from(TRAMPOLINE).into(),
@@ -78,12 +81,12 @@ impl MemorySet {
             PTEFlags::R | PTEFlags::X,
         );
     }
-    /// Without kernel stacks.
+    /// 创建内核地址空间(不包含内核栈)
     pub fn new_kernel() -> Self {
         let mut memory_set = Self::new_bare();
-        // map trampoline
+        // 映射跳板
         memory_set.map_trampoline();
-        // map kernel sections
+        // 映射内核各段
         info!(".text [{:#x}, {:#x})", stext as usize, etext as usize);
         info!(".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
         info!(".data [{:#x}, {:#x})", sdata as usize, edata as usize);
@@ -143,13 +146,13 @@ impl MemorySet {
         );
         memory_set
     }
-    /// Include sections in elf and trampoline and TrapContext and user stack,
-    /// also returns user_sp_base and entry point.
+    /// 从ELF文件创建地址空间，包含ELF各段、跳板、TrapContext和用户栈，
+    /// 同时返回用户栈基址和入口点
     pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize) {
         let mut memory_set = Self::new_bare();
-        // map trampoline
+        // 映射跳板
         memory_set.map_trampoline();
-        // map program headers of elf, with U flag
+        // 映射程序各段，添加U标志
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
         let elf_header = elf.header;
         let magic = elf_header.pt1.magic;
@@ -180,10 +183,10 @@ impl MemorySet {
                 );
             }
         }
-        // map user stack with U flags
+        // 映射用户栈，添加U标志
         let max_end_va: VirtAddr = max_end_vpn.into();
         let mut user_stack_bottom: usize = max_end_va.into();
-        // guard page
+        // 添加保护页
         user_stack_bottom += PAGE_SIZE;
         let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
         memory_set.push(
@@ -195,7 +198,7 @@ impl MemorySet {
             ),
             None,
         );
-        // used in sbrk
+        // 用于sbrk系统调用
         memory_set.push(
             MapArea::new(
                 user_stack_top.into(),
@@ -205,7 +208,7 @@ impl MemorySet {
             ),
             None,
         );
-        // map TrapContext
+        // 映射TrapContext
         memory_set.push(
             MapArea::new(
                 TRAP_CONTEXT_BASE.into(),
@@ -221,7 +224,7 @@ impl MemorySet {
             elf.header.pt2.entry_point() as usize,
         )
     }
-    /// Change page table by writing satp CSR Register.
+    /// 通过写入satp CSR寄存器来切换页表
     pub fn activate(&self) {
         let satp = self.page_table.token();
         unsafe {
@@ -229,11 +232,11 @@ impl MemorySet {
             asm!("sfence.vma");
         }
     }
-    /// Translate a virtual page number to a page table entry
+    /// 将虚拟页号转换为页表项
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
     }
-    /// shrink the area to new_end
+    /// 将区域缩小到新的结束地址
     #[allow(unused)]
     pub fn shrink_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
         if let Some(area) = self
@@ -248,7 +251,7 @@ impl MemorySet {
         }
     }
 
-    /// append the area to new_end
+    /// 将区域扩展到新的结束地址
     #[allow(unused)]
     pub fn append_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
         if let Some(area) = self
@@ -263,12 +266,12 @@ impl MemorySet {
         }
     }
 }
-/// map area structure, controls a contiguous piece of virtual memory
+/// 映射区域结构，控制一段连续的虚拟内存
 pub struct MapArea {
-    vpn_range: VPNRange,
-    data_frames: BTreeMap<VirtPageNum, FrameTracker>,
-    map_type: MapType,
-    map_perm: MapPermission,
+    vpn_range: VPNRange,                              // 虚拟页号的范围
+    data_frames: BTreeMap<VirtPageNum, FrameTracker>, // 保存帧的数据结构
+    map_type: MapType,                                // 映射类型
+    map_perm: MapPermission,                          // 映射权限
 }
 
 impl MapArea {
@@ -334,8 +337,8 @@ impl MapArea {
         }
         self.vpn_range = VPNRange::new(self.vpn_range.get_start(), new_end);
     }
-    /// data: start-aligned but maybe with shorter length
-    /// assume that all frames were cleared before
+    /// 复制数据，数据起始对齐但长度可能较短
+    /// 假定所有帧在之前都已清零
     pub fn copy_data(&mut self, page_table: &mut PageTable, data: &[u8]) {
         assert_eq!(self.map_type, MapType::Framed);
         let mut start: usize = 0;
@@ -359,34 +362,34 @@ impl MapArea {
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
-/// map type for memory set: identical or framed
+/// 内存集的映射类型：恒等映射或分帧映射
 pub enum MapType {
-    Identical,
-    Framed,
+    Identical,  // 恒等映射
+    Framed,     // 分帧映射
 }
 
 bitflags! {
-    /// map permission corresponding to that in pte: `R W X U`
+    /// 映射权限，对应页表项中的 `R W X U` 标志位
     pub struct MapPermission: u8 {
-        ///Readable
+        /// 可读
         const R = 1 << 1;
-        ///Writable
+        /// 可写
         const W = 1 << 2;
-        ///Excutable
+        /// 可执行
         const X = 1 << 3;
-        ///Accessible in U mode
+        /// U模式可访问
         const U = 1 << 4;
     }
 }
 
-/// Return (bottom, top) of a kernel stack in kernel space.
+/// 返回内核空间中内核栈的(底部,顶部)地址
 pub fn kernel_stack_position(app_id: usize) -> (usize, usize) {
     let top = TRAMPOLINE - app_id * (KERNEL_STACK_SIZE + PAGE_SIZE);
     let bottom = top - KERNEL_STACK_SIZE;
     (bottom, top)
 }
 
-/// remap test in kernel space
+/// 内核空间中的重映射测试
 #[allow(unused)]
 pub fn remap_test() {
     let mut kernel_space = KERNEL_SPACE.exclusive_access();
