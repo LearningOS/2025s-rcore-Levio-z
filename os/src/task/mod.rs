@@ -15,8 +15,10 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::MemorySet;
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
+
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
@@ -126,6 +128,13 @@ impl TaskManager {
         inner.tasks[inner.current_task].get_trap_cx()
     }
 
+    /// Get the current 'Running' task's memory set.
+    pub fn get_memory_set(&self) ->&'static mut MemorySet {
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        inner.tasks[current_task].get_memory_set()
+    }
+
     /// Change the current 'Running' task's program break
     pub fn change_current_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner.exclusive_access();
@@ -152,6 +161,18 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+    /// Add systrace call number
+    fn sys_trace_add_one(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].sys_traces[syscall_id] += 1;
+    }
+    /// Read systrace call number
+    fn sys_trace_read(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].sys_traces[syscall_id]
     }
 }
 
@@ -198,7 +219,21 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
     TASK_MANAGER.get_current_trap_cx()
 }
 
+/// Get the current 'Running' task's trap contexts.
+pub fn get_memory_set() ->&'static mut MemorySet {
+    TASK_MANAGER.get_memory_set()
+}
+
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Add systrace call number
+pub fn sys_trace_add_one(syscall_id: usize) {
+    TASK_MANAGER.sys_trace_add_one(syscall_id);
+}
+/// Read systrace call number
+pub fn sys_trace_read(syscall_id: usize) -> usize {
+    TASK_MANAGER.sys_trace_read(syscall_id)
 }

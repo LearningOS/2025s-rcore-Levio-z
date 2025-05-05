@@ -57,7 +57,7 @@ pub fn enable_timer_interrupt() {
 #[no_mangle]
 pub fn trap_handler() -> ! {
     set_kernel_trap_entry();
-    let cx = current_trap_cx();
+    let cx: &mut TrapContext = current_trap_cx();
     let scause = scause::read(); // get trap cause
     let stval = stval::read(); // get extra value
     // trace!("into {:?}", scause.cause());

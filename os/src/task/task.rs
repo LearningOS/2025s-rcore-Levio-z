@@ -5,6 +5,7 @@ use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
 use crate::trap::{trap_handler, TrapContext};
+use crate::config::MAX_SYSCALL_NUM;
 
 /// The task control block (TCB) of a task.
 pub struct TaskControlBlock {
@@ -28,6 +29,9 @@ pub struct TaskControlBlock {
 
     /// Program break
     pub program_brk: usize,
+
+    /// the max number of sysCall
+    pub sys_traces: [usize;MAX_SYSCALL_NUM],
 }
 
 impl TaskControlBlock {
@@ -38,6 +42,10 @@ impl TaskControlBlock {
     /// get the user token
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
+    }
+    /// Get the current 'Running' task's memory set.
+    pub fn get_memory_set(&mut self) -> &'static mut MemorySet{
+        unsafe { (&mut self.memory_set as *mut MemorySet).as_mut().unwrap() }
     }
     /// Based on the elf info in program, build the contents of task in a new address space
     pub fn new(elf_data: &[u8], app_id: usize) -> Self {
@@ -63,6 +71,7 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
+            sys_traces: [0;MAX_SYSCALL_NUM],
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
