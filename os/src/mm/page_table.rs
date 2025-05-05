@@ -6,7 +6,6 @@ use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPag
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
-use crate::config::PAGE_SIZE;
 // flag
 bitflags! {
     /// page table entry flags
@@ -200,7 +199,7 @@ pub fn trace_read_or_write(
                 buffers[0][0] as isize
             }
             1 if page.writable() => {
-                write_to_va(&data,token,ptr);
+                write_to_va(&data, token, ptr);
                 0
             }
             _ => -1,
@@ -221,18 +220,13 @@ pub fn struct_to_bytes<T>(my_struct: &T) -> (&[u8], usize) {
 
 /// 将结构体类型写入应用空间的一个虚拟地址
 pub fn write_to_va<T>(my_struct: &T,token: usize, const_ptr: *const u8){
-    let stc_data = struct_to_bytes(&my_struct);
-    let mut buffers = translated_byte_buffer(token, const_ptr, stc_data.1);
+    let (data,total_len) = struct_to_bytes(my_struct);
+    let mut buffers = translated_byte_buffer(token, const_ptr, total_len);
+   
+    let mut start = 0;
     for buffer in buffers.iter_mut() {
-        let mut start = 0;
-        let data = stc_data.0;
-        let len: usize = data.len();
-        loop {
-            buffer.copy_from_slice(&data[start..len.min(start + PAGE_SIZE)]);
-            start += PAGE_SIZE;
-            if start >= len {
-                break;
-            }
-        }
+        let len: usize = buffer.len();
+        buffer[..len].copy_from_slice(&data[start..start + len]);
+        start += len;
     }
 }
