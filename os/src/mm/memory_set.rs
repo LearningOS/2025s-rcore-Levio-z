@@ -265,6 +265,19 @@ impl MemorySet {
             false
         }
     }
+    /// check vpn
+    pub fn check_vpn(&mut self, start: usize) -> bool {
+        let start_va: VirtAddr = start.into();
+        let start_vpn: VirtPageNum = start_va.floor();
+        let mut vpns: Vec<VirtPageNum> = Vec::new();
+        for i in self.areas.iter() {
+            vpns.extend(i.data_frames.keys().cloned().collect::<Vec<VirtPageNum>>());
+        }
+        if !vpns.contains(&start_vpn) {
+            return false;
+        }
+        true
+    }
 
     /// mmap
     pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
@@ -288,7 +301,7 @@ impl MemorySet {
         }
         let vpn_range = VPNRange::new(start_vpn, end_vpn);
         for vpn in vpn_range {
-            if vpns.contains(&vpn){
+            if vpns.contains(&vpn) {
                 return -1;
             }
         }
@@ -322,12 +335,10 @@ impl MemorySet {
         }
         let vpn_range = VPNRange::new(start_vpn, end_vpn);
         for vpn in vpn_range {
-            if !vpns.contains(&vpn){
+            if !vpns.contains(&vpn) {
                 return -1;
             }
         }
-     
-  
 
         for vpn in vpn_range {
             for i in self.areas.iter_mut() {
