@@ -33,7 +33,7 @@ pub use task::{TaskControlBlock, TaskStatus};
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;
 pub use processor::{
-    current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
+    current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,current_memory_set,
     Processor,
 };
 /// Suspend the current 'Running' task and run the next task in task list.

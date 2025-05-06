@@ -1,5 +1,5 @@
 //! Implementation of [`MapArea`] and [`MemorySet`].
-use super::{frame_alloc, FrameTracker};
+use super::{frame_alloc, FrameTracker,get_free_size};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
@@ -13,15 +13,15 @@ use lazy_static::*;
 use riscv::register::satp;
 
 extern "C" {
-    fn stext();     // .text段的起始位置
-    fn etext();     // .text段的结束位置
-    fn srodata();   // .rodata段的起始位置
-    fn erodata();   // .rodata段的结束位置
-    fn sdata();     // .data段的起始位置
-    fn edata();     // .data段的结束位置
-    fn sbss_with_stack();  // .bss段(包含内核栈)的起始位置
-    fn ebss();      // .bss段的结束位置
-    fn ekernel();   // 整个内核的结束位置
+    fn stext(); // .text段的起始位置
+    fn etext(); // .text段的结束位置
+    fn srodata(); // .rodata段的起始位置
+    fn erodata(); // .rodata段的结束位置
+    fn sdata(); // .data段的起始位置
+    fn edata(); // .data段的结束位置
+    fn sbss_with_stack(); // .bss段(包含内核栈)的起始位置
+    fn ebss(); // .bss段的结束位置
+    fn ekernel(); // 整个内核的结束位置
     fn strampoline(); // 跳板的起始位置
 }
 
@@ -318,8 +318,93 @@ impl MemorySet {
             false
         }
     }
+
+    /// check vpn
+    pub fn check_vpn(&mut self, start: usize) -> bool {
+        let start_va: VirtAddr = start.into();
+        let start_vpn: VirtPageNum = start_va.floor();
+        let mut vpns: Vec<VirtPageNum> = Vec::new();
+        for i in self.areas.iter() {
+            vpns.extend(i.data_frames.keys().cloned().collect::<Vec<VirtPageNum>>());
+        }
+        if !vpns.contains(&start_vpn) {
+            return false;
+        }
+        true
+    }
+
+    /// mmap
+    pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
+        let end_va: VirtAddr = (start + len).into();
+        let start_va: VirtAddr = start.into();
+        let size = len / PAGE_SIZE;
+        // check
+        if start_va.page_offset() != 0
+            || port & !0x7 != 0
+            || port & 0x7 == 0
+            || get_free_size() < size
+        {
+            return -1;
+        }
+        let start_vpn: VirtPageNum = start_va.floor();
+        let end_vpn: VirtPageNum = end_va.ceil();
+
+        let mut vpns: Vec<VirtPageNum> = Vec::new();
+        for i in self.areas.iter() {
+            vpns.extend(i.data_frames.keys().cloned().collect::<Vec<VirtPageNum>>());
+        }
+        let vpn_range = VPNRange::new(start_vpn, end_vpn);
+        for vpn in vpn_range {
+            if vpns.contains(&vpn) {
+                return -1;
+            }
+        }
+
+        self.push(
+            MapArea::new(
+                start_va,
+                end_va,
+                MapType::Framed,
+                MapPermission::from_bits((port << 1) as u8).unwrap() | MapPermission::U,
+            ),
+            None,
+        );
+        0
+    }
+
+    /// munmap
+    pub fn munmap(&mut self, start: usize, len: usize) -> isize {
+        let end_va: VirtAddr = (start + len).into();
+        let start_va: VirtAddr = start.into();
+        let start_vpn: VirtPageNum = start_va.floor();
+        let end_vpn: VirtPageNum = end_va.ceil();
+
+        if start_va.page_offset() != 0 {
+            return -1;
+        }
+        let mut vpns: Vec<VirtPageNum> = Vec::new();
+
+        for i in self.areas.iter() {
+            vpns.extend(i.data_frames.keys().cloned().collect::<Vec<VirtPageNum>>());
+        }
+        let vpn_range = VPNRange::new(start_vpn, end_vpn);
+        for vpn in vpn_range {
+            if !vpns.contains(&vpn) {
+                return -1;
+            }
+        }
+
+        for vpn in vpn_range {
+            for i in self.areas.iter_mut() {
+                if i.data_frames.contains_key(&vpn) {
+                    i.unmap_one(&mut self.page_table, vpn);
+                }
+            }
+        }
+        0
+    }
 }
-/// map area structure, controls a contiguous piece of virtual memory
+/// 映射区域结构，控制一段连续的虚拟内存
 pub struct MapArea {
     vpn_range: VPNRange,
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
@@ -363,7 +448,7 @@ impl MapArea {
                 self.data_frames.insert(vpn, frame);
             }
         }
-        let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
+        let pte_flags: PTEFlags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
     }
     pub fn unmap_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
@@ -423,8 +508,8 @@ impl MapArea {
 #[derive(Copy, Clone, PartialEq, Debug)]
 /// map type for memory set: identical or framed
 pub enum MapType {
-    Identical,
-    Framed,
+    Identical, // 恒等映射
+    Framed,    // 分帧映射
 }
 
 bitflags! {
