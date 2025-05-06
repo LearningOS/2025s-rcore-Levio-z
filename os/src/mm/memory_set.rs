@@ -13,16 +13,16 @@ use lazy_static::*;
 use riscv::register::satp;
 
 extern "C" {
-    fn stext();
-    fn etext();
-    fn srodata();
-    fn erodata();
-    fn sdata();
-    fn edata();
-    fn sbss_with_stack();
-    fn ebss();
-    fn ekernel();
-    fn strampoline();
+    fn stext();     // .text段的起始位置
+    fn etext();     // .text段的结束位置
+    fn srodata();   // .rodata段的起始位置
+    fn erodata();   // .rodata段的结束位置
+    fn sdata();     // .data段的起始位置
+    fn edata();     // .data段的结束位置
+    fn sbss_with_stack();  // .bss段(包含内核栈)的起始位置
+    fn ebss();      // .bss段的结束位置
+    fn ekernel();   // 整个内核的结束位置
+    fn strampoline(); // 跳板的起始位置
 }
 
 lazy_static! {
