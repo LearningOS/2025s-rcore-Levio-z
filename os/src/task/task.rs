@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{TRAP_CONTEXT_BASE,BIG_STRIDE};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -33,6 +33,10 @@ impl TaskControlBlock {
     pub fn get_user_token(&self) -> usize {
         let inner = self.inner_exclusive_access();
         inner.memory_set.token()
+    }
+    /// Get memory set
+    pub fn get_memory_set(&mut self) -> &'static mut MemorySet{
+        self.inner.exclusive_access().get_memory_set()
     }
 }
 
@@ -68,6 +72,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    pub stride: usize,
+
+    pub pass: usize,
+
+    pub priority: usize,
 }
 
 impl TaskControlBlockInner {
@@ -84,6 +94,19 @@ impl TaskControlBlockInner {
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+
+    pub fn get_memory_set(&mut self) -> &'static mut MemorySet{
+        unsafe { (&mut self.memory_set as *mut MemorySet).as_mut().unwrap() }
+    }
+
+    pub fn set_priority(&mut self,priority:isize){
+        self.priority = priority as usize;
+        self.pass = BIG_STRIDE/priority as usize;
+    }
+
+    pub fn add_step(&mut self){
+        self.stride += self.pass;
     }
 }
 
@@ -118,6 +141,9 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride:0,
+                    pass: BIG_STRIDE/16,
+                    priority: 16,
                 })
             },
         };
@@ -132,6 +158,17 @@ impl TaskControlBlock {
         );
         task_control_block
     }
+    /// Load a new elf
+    pub fn spawn(self: &Arc<Self>,elf_data: &[u8])->Arc<Self>{
+        let mut parent_inner =self.inner_exclusive_access();
+        let task_context_block =Arc::new(TaskControlBlock::new(elf_data));
+        let mut inner = task_context_block.inner_exclusive_access();
+        inner.parent = Some(Arc::downgrade(self));
+        inner.exit_code = 0;
+        // add child
+        parent_inner.children.push(task_context_block.clone());
+        task_context_block.clone()
+    }
 
     /// Load a new elf to replace the original application address space and start execution
     pub fn exec(&self, elf_data: &[u8]) {
@@ -143,7 +180,7 @@ impl TaskControlBlock {
             .ppn();
 
         // **** access current TCB exclusively
-        let mut inner = self.inner_exclusive_access();
+        let mut inner: RefMut<'_, TaskControlBlockInner> = self.inner_exclusive_access();
         // substitute memory_set
         inner.memory_set = memory_set;
         // update trap_cx ppn
@@ -191,6 +228,9 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride:0,
+                    pass: BIG_STRIDE/16,
+                    priority: 16,
                 })
             },
         });

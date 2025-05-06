@@ -81,6 +81,9 @@ gdbserver: build
 	@qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) -s -S
 
 gdbclient:
-	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
+	@$(gdb) -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
 
 .PHONY: build env kernel clean disasm disasm-vim run-inner gdbserver gdbclient
+# GDB wrapper to handle virtual path to core lib and types display in Rust
+GDB_PATH := /root/gdb-14.2/build-riscv64/bin/riscv64-unknown-elf-gdb
+gdb := RUST_GDB=$(GDB_PATH) rust-gdb

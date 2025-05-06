@@ -7,6 +7,7 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
+use crate::mm::MemorySet;
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
@@ -109,3 +110,13 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
 }
+
+/// Get the current 'Running' task's memory set.
+pub fn current_memory_set() -> &'static mut MemorySet {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_memory_set()
+}
+
+

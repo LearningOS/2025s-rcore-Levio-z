@@ -1,10 +1,12 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
+
+use core::{mem, slice};
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
-
+// flag
 bitflags! {
     /// page table entry flags
     pub struct PTEFlags: u8 {
@@ -212,4 +214,52 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
         .translate_va(VirtAddr::from(va))
         .unwrap()
         .get_mut()
+}
+/// 检查读写，然后执行
+pub fn trace_read_or_write(
+    token: usize,
+    trace_request: usize,
+    ptr: *const u8,
+    data: usize,
+) -> isize {
+    let page_table = PageTable::from_token(token);
+    let va = VirtAddr::from(ptr as usize);
+    let vpn = va.floor();
+    match page_table.translate(vpn) {
+        None => -1,
+        Some(page) => match trace_request {
+            0 if page.readable() => {
+                let buffers = translated_byte_buffer(token, ptr, 1);
+                buffers[0][0] as isize
+            }
+            1 if page.writable() => {
+                write_to_va(&data,token,ptr);
+                0
+            }
+            _ => -1,
+        },
+    }
+}
+/// 将类型转换为 &[u8]
+pub fn struct_to_bytes<T>(my_struct: &T) -> (&[u8], usize) {
+    // 获取结构体的原始指针
+    let ptr = my_struct as *const T as *const u8;
+
+    // 计算结构体的大小
+    let size = mem::size_of::<T>();
+
+    // 将原始指针和大小转换为切片
+    (unsafe { slice::from_raw_parts(ptr, size) }, size)
+}
+
+/// 将结构体类型写入应用空间的一个虚拟地址
+pub fn write_to_va<T>(my_struct: &T,token: usize, const_ptr: *const u8){
+    let (data,total_len) = struct_to_bytes(my_struct);
+    let mut buffers = translated_byte_buffer(token, const_ptr, total_len);
+    let mut start: usize = 0;
+    for buffer in buffers.iter_mut() {
+        let len: usize = buffer.len();
+        buffer[..len].copy_from_slice(&data[start..start + len]);
+        start += len;
+    }
 }
