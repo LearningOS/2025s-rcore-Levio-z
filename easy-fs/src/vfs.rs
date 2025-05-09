@@ -75,6 +75,24 @@ impl Inode {
             })
         })
     }
+    /// Detete by name
+    pub fn delete_by_name(&self, name: &str) {
+        self.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let mut dirent = DirEntry::empty();
+            for i in 0..file_count {
+                assert_eq!(
+                    root_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device),
+                    DIRENT_SZ,
+                );
+                if dirent.name() == name {
+                    dirent = DirEntry::empty();
+                    root_inode.write_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device);
+                }
+            }
+        });
+    }
     /// Increase the size of a disk inode
     fn increase_size(
         &self,
@@ -127,6 +145,7 @@ impl Inode {
                 );
                 if dirent.name() == blank {
                     entry_offset = i * DIRENT_SZ;
+                    break;
                 }
             }
             if entry_offset == file_count * DIRENT_SZ {
@@ -135,7 +154,7 @@ impl Inode {
                 self.increase_size(new_size as u32, root_inode, &mut fs);
             }
             // write dirent
-            let dirent = DirEntry::new(name, new_inode_id);
+            dirent = DirEntry::new(name, new_inode_id);
             root_inode.write_at(entry_offset, dirent.as_bytes(), &self.block_device);
         });
 
@@ -242,7 +261,7 @@ impl Inode {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
             .modify(block_offset, |inode: &mut DiskInode| {
-                inode.nlink += inode.nlink;
+                inode.nlink += 1;
             });
 
         // 3.Add new dir entry
@@ -259,6 +278,7 @@ impl Inode {
                 );
                 if dirent.name() == blank {
                     entry_offset = i * DIRENT_SZ;
+                    break;
                 }
             }
             if entry_offset == file_count * DIRENT_SZ {
@@ -267,7 +287,7 @@ impl Inode {
                 self.increase_size(new_size as u32, root_inode, &mut fs);
             }
             // write dirent
-            let dirent = DirEntry::new(new_name, inode_id);
+            dirent = DirEntry::new(new_name, inode_id);
             root_inode.write_at(entry_offset, dirent.as_bytes(), &self.block_device);
         });
         block_cache_sync_all();
@@ -276,7 +296,7 @@ impl Inode {
 
     /// Create inode under current inode by name
     pub fn unlinkat(&self, name: &str) -> (isize, u32) {
-        let mut fs = self.fs.lock();
+        let fs = self.fs.lock();
         let mut nlink = 0;
         // 1.find inode_id
         let op = |root_inode: &DiskInode| {
@@ -301,7 +321,6 @@ impl Inode {
                 inode.nlink -= 1;
             });
         // 3.修改目录项
-        let dirent: DirEntry = DirEntry::new(name, inode_id);
         self.modify_disk_inode(|root_inode| {
             let file_count = (root_inode.size as usize) / DIRENT_SZ;
             let mut dirent = DirEntry::empty();
@@ -322,22 +341,5 @@ impl Inode {
         });
         block_cache_sync_all();
         (0, nlink)
-    }
-
-    fn delete_entry_by_name(&self, name: &str, disk_inode: &DiskInode) -> Option<u32> {
-        // assert it is a directory
-        assert!(disk_inode.is_dir());
-        let file_count = (disk_inode.size as usize) / DIRENT_SZ;
-        let mut dirent: DirEntry = DirEntry::empty();
-        for i in 0..file_count {
-            assert_eq!(
-                disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
-                DIRENT_SZ,
-            );
-            if dirent.name() == name {
-                return Some(dirent.inode_id() as u32);
-            }
-        }
-        None
     }
 }

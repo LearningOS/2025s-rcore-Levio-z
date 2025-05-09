@@ -145,6 +145,7 @@ pub fn unlinkat_file(name: &str) -> isize {
             if let Some(inode) = ROOT_INODE.find(name) {
                 // clear size
                 inode.delete(name);
+                ROOT_INODE.delete_by_name(name);
             }
         }
         return 0;
