@@ -3,6 +3,7 @@ use super::{
     SuperBlock,
 };
 use crate::BLOCK_SZ;
+use crate::INODE_SZ;
 use alloc::sync::Arc;
 use spin::Mutex;
 ///An easy file system on block
@@ -18,6 +19,7 @@ pub struct EasyFileSystem {
 }
 
 type DataBlock = [u8; BLOCK_SZ];
+type InodeBlock = [u8; INODE_SZ];
 /// An easy fs over a block device
 impl EasyFileSystem {
     /// A data block of block size
@@ -76,7 +78,7 @@ impl EasyFileSystem {
         get_block_cache(root_inode_block_id as usize, Arc::clone(&block_device))
             .lock()
             .modify(root_inode_offset, |disk_inode: &mut DiskInode| {
-                disk_inode.initialize(DiskInodeType::Directory);
+                disk_inode.initialize(DiskInodeType::Directory, 0);
             });
         block_cache_sync_all();
         Arc::new(Mutex::new(efs))
@@ -147,5 +149,17 @@ impl EasyFileSystem {
             &self.block_device,
             (block_id - self.data_area_start_block) as usize,
         )
+    }
+    /// Deallocate a inode block
+    pub fn dealloc_inode(&mut self, block_id: u32, offset: usize) {
+        get_block_cache(block_id as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(offset, |inode_array: &mut InodeBlock| {
+                inode_array.iter_mut().for_each(|p| {
+                    *p = 0;
+                })
+            });
+        self.inode_bitmap
+            .dealloc(&self.block_device, block_id as usize)
     }
 }

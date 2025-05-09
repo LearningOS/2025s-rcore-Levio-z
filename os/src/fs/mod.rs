@@ -4,9 +4,10 @@ mod inode;
 mod stdio;
 
 use crate::mm::UserBuffer;
+use core::any::Any;
 
 /// trait File for all file types
-pub trait File: Send + Sync {
+pub trait File: Send + Sync +Any{
     /// the file readable?
     fn readable(&self) -> bool;
     /// the file writable?
@@ -15,6 +16,8 @@ pub trait File: Send + Sync {
     fn read(&self, buf: UserBuffer) -> usize;
     /// write to the file from buf, return the number of bytes written
     fn write(&self, buf: UserBuffer) -> usize;
+    /// as_any
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// The stat of a inode
@@ -32,7 +35,23 @@ pub struct Stat {
     /// unused pad
     pad: [u64; 7],
 }
-
+impl Stat{
+    /// new 
+    pub fn new(ino: u64, nlink: u32, raw_mode: u32) -> Self {
+        // 构造文件类型字段（mode）
+        let mode = StatMode::from_bits_truncate(raw_mode);
+        // 权限（可选扩展）
+        // if readable { mode |= StatMode::READ; } // 自定义
+        // if writable { mode |= StatMode::WRITE; }
+        Self {
+            dev: 0,
+            ino,
+            nlink,
+            mode,
+            pad: [0; 7], // 填充字段通常保留
+        }
+    }
+}
 bitflags! {
     /// The mode of a inode
     /// whether a directory or a file
@@ -46,5 +65,5 @@ bitflags! {
     }
 }
 
-pub use inode::{list_apps, open_file, OSInode, OpenFlags};
+pub use inode::{list_apps, open_file, OSInode, OpenFlags,linkat_file,unlinkat_file};
 pub use stdio::{Stdin, Stdout};

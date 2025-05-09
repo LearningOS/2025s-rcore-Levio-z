@@ -4,7 +4,6 @@ use alloc::sync::Arc;
 
 use crate::{
     fs::{open_file, OpenFlags},
-    loader::get_app_data_by_name,
     mm::{translated_refmut, translated_str, write_to_va},
     task::{
         add_task, current_memory_set, current_task, current_user_token, exit_current_and_run_next,
@@ -156,9 +155,10 @@ pub fn sys_sbrk(size: i32) -> isize {
 pub fn sys_spawn(path: *const u8) -> isize {
     let token = current_user_token();
     let path = translated_str(token, path);
-    if let Some(data) = get_app_data_by_name(path.as_str()) {
+    if let Some(inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
         let current_task = current_task().unwrap();
-        let task =current_task.spawn(data);
+        let data: alloc::vec::Vec<u8> = inode.read_all();
+        let task =current_task.spawn(data.as_slice());
         let id = task.pid.0;
         add_task(task);
         id as isize

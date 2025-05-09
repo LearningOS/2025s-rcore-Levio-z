@@ -10,6 +10,8 @@ mod layout;
 mod vfs;
 /// Use a block size of 512 bytes
 pub const BLOCK_SZ: usize = 512;
+/// Use a inode size of 512 bytes
+pub const INODE_SZ: usize = 128;
 use bitmap::Bitmap;
 use block_cache::{block_cache_sync_all, get_block_cache};
 pub use block_dev::BlockDevice;
