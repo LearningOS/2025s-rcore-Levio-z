@@ -106,54 +106,76 @@ impl ProcessControlBlockInner {
     }
     /// try alloc detect_deadlock
     pub fn try_alloc_deadlock(&mut self,rs_type: usize,tid: usize,type_id:usize) -> bool{
-        self.need[rs_type][tid][type_id] += 1;
-        if  self.available[rs_type][type_id]>0 && self.detect_deadlock(rs_type,tid,type_id){
-            self.allocation[rs_type][tid][type_id]+=1;
-            self.available[rs_type][type_id]-=1;
-            self.need[rs_type][tid][type_id]-=1;
-            return true;
+
+        if self.available[rs_type][type_id] == 0 {
+            return false;
         }
-        false 
+
+        self.available[rs_type][type_id]      -= 1;
+        self.allocation[rs_type][tid][type_id] += 1;
+
+        let safe = self.detect_deadlock(rs_type);
+        if safe {
+            true
+        } else {
+            // 回滚
+            self.available[rs_type][type_id]+= 1;
+            self.allocation[rs_type][tid][type_id]-= 1;
+            self.need[rs_type][tid][type_id] += 1;
+            false
+        } 
     }
 
     /// release detect_deadlock
     pub fn release_deadlock(&mut self,rs_type: usize,tid: usize,type_id:usize){
+        if !self.enable_deadlock || self.allocation[rs_type][tid][type_id] == 0                  
+        {
+            return;
+        }
         if self.enable_deadlock{
-            if self.allocation[rs_type][tid][type_id]>0{
-                self.allocation[rs_type][tid][type_id]-=1;
-            }
-            self.available[rs_type][type_id]+=1;
+            self.allocation[rs_type][tid][type_id]-=1;
+            self.available[rs_type][type_id]+= 1;
         }
     }
     /// detect_deadlock
-    pub fn detect_deadlock(&self,rs_type: usize,tid: usize,type_id:usize) -> bool{
-        let mut available = self.available.clone();
-        let mut allocation = self.allocation.clone();
-        let mut need = self.need.clone();
-        println!("available:{:?}-allocation:{:?}-need:{:?}",available,allocation,need);
-        println!("rs_type:{}-tid:{}-type_id:{}",rs_type,tid,type_id);
-        // 模拟分配
-        available[rs_type][type_id]-=1;
-        need[rs_type][tid][type_id]-=1;
-        allocation[rs_type][tid][type_id]+=1;
-        let n = allocation[rs_type].len();
-        let m = available[rs_type].len();
+    pub fn detect_deadlock(&self,rs_type: usize) -> bool{
+        let mut work = self.available[rs_type].clone();
+        let n = self.allocation[rs_type].len();
         let mut finish = vec![false; n];
-        loop{
+
+        debug!("self.allocation:{:?}self.available:{:?}self.need:{:?}",self.allocation,self.available,self.need);
+
+        loop {
             let mut update = false;
-            for i in 0..n{
-                if !finish[i] && (0..m).all(|j|need[rs_type][i][j]<=available[rs_type][j]){
-                    for j in 0..m{
-                        available[rs_type][j]+= allocation[rs_type][i][j];
+    
+            for (pid, (need_row, alloc_row)) in
+                self.need[rs_type]
+                    .iter()
+                    .zip(&self.allocation[rs_type])
+                    .enumerate()
+            {
+                if finish[pid] { continue; }
+    
+                let can_finish = need_row
+                    .iter()
+                    .zip(&work)
+                    .all(|(need_i, work_i)| need_i <= work_i);
+    
+                if can_finish {
+                    for (w, &a) in work.iter_mut().zip(alloc_row) {
+                        *w += a;
                     }
-                    finish[i] = true;
+                    finish[pid] = true;
                     update = true;
                 }
             }
-            if !update{
+    
+            if !update {
                 break;
             }
         }
+        debug!("Final state - allocation:{:?}, available:{:?}, need:{:?}, finish:{:?}",
+           self.allocation, self.available, self.need, finish);
         finish.iter().all(|&x|x)
     }
 }
