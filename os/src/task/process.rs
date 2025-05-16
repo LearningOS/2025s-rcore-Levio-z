@@ -49,6 +49,14 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// enable_deadlock
+    pub enable_deadlock: bool,
+    /// available
+    pub available: [Vec<usize>;2],
+    /// allocation
+    pub allocation: [Vec<Vec<usize>>;2],
+    /// need
+    pub need: [Vec<Vec<usize>>;2],
 }
 
 impl ProcessControlBlockInner {
@@ -68,10 +76,21 @@ impl ProcessControlBlockInner {
     }
     /// allocate a new task id
     pub fn alloc_tid(&mut self) -> usize {
-        self.task_res_allocator.alloc()
+        let len =self.task_res_allocator.alloc();
+        if len+1 > self.allocation[0].len() {
+            self.allocation[0].push(vec![0; self.available[0].len()]);
+            self.need[0].push(vec![0; self.available[0].len()]);
+            self.allocation[1].push(vec![0; self.available[1].len()]);
+            self.need[1].push(vec![0; self.available[1].len()]);
+        }
+        len
     }
     /// deallocate a task id
     pub fn dealloc_tid(&mut self, tid: usize) {
+        self.allocation[0][tid].iter_mut().for_each(|x|*x=0);
+        self.need[0][tid].iter_mut().for_each(|x|*x=0);
+        self.allocation[1][tid].iter_mut().for_each(|x|*x=0);
+        self.need[1][tid].iter_mut().for_each(|x|*x=0);
         self.task_res_allocator.dealloc(tid)
     }
     /// the count of tasks(threads) in this process
@@ -81,6 +100,52 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+    /// try alloc detect_deadlock
+    pub fn try_alloc_deadlock(&mut self,rs_type: usize,tid: usize,type_id:usize) -> bool{
+        self.need[rs_type][tid][type_id] += 1;
+        if self.detect_deadlock(rs_type,tid,type_id){
+            self.allocation[rs_type][tid][type_id]+=1;
+            self.available[rs_type][type_id]-=1;
+            self.need[rs_type][tid][type_id] -= 1;
+            return true;
+        }
+        false 
+    }
+
+    /// release detect_deadlock
+    pub fn release_deadlock(&mut self,rs_type: usize,tid: usize,type_id:usize){
+        if self.enable_deadlock{
+            self.allocation[rs_type][tid][type_id]-=1;
+            self.available[rs_type][type_id]+=1;
+        }
+    }
+    /// detect_deadlock
+    pub fn detect_deadlock(&self,rs_type: usize,tid: usize,type_id:usize) -> bool{
+        let mut available = self.available.clone();
+        let allocation = self.allocation.clone();
+        let mut need = self.need.clone();
+        need[rs_type][tid][type_id] += 1;
+        let n = allocation[rs_type].len();
+        let m = available[rs_type].len();
+        let mut finish = vec![false; n];
+        loop{
+            let mut update = false;
+            for i in 0..n{
+                if !finish[i] && (0..m).all(|j|need[rs_type][i][j]<=available[rs_type][j]){
+                    for j in 0..m{
+                        let avail = &mut available[rs_type][j];
+                        *avail += allocation[rs_type][i][j];
+                    }
+                    finish[i] = true;
+                    update = true;
+                }
+            }
+            if !update{
+                break;
+            }
+        }
+        finish.iter().all(|&x|x==true)
     }
 }
 
@@ -119,6 +184,10 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    enable_deadlock: false,
+                    available :core::array::from_fn(|_| Vec::new()),
+                    allocation: core::array::from_fn(|_| Vec::new()),
+                    need: core::array::from_fn(|_| Vec::new()),
                 })
             },
         });
@@ -245,6 +314,10 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    enable_deadlock: false,
+                    available :core::array::from_fn(|_| Vec::new()),
+                    allocation: core::array::from_fn(|_| Vec::new()),
+                    need: core::array::from_fn(|_| Vec::new()),
                 })
             },
         });
