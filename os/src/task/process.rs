@@ -90,10 +90,6 @@ impl ProcessControlBlockInner {
     }
     /// deallocate a task id
     pub fn dealloc_tid(&mut self, tid: usize) {
-        self.allocation[0][tid].iter_mut().for_each(|x|*x=0);
-        self.need[0][tid].iter_mut().for_each(|x|*x=0);
-        self.allocation[1][tid].iter_mut().for_each(|x|*x=0);
-        self.need[1][tid].iter_mut().for_each(|x|*x=0);
         self.task_res_allocator.dealloc(tid)
     }
     /// the count of tasks(threads) in this process
@@ -104,34 +100,23 @@ impl ProcessControlBlockInner {
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
-    /// try alloc detect_deadlock
-    pub fn try_alloc_deadlock(&mut self,rs_type: usize,tid: usize,type_id:usize) -> bool{
-
-        if self.available[rs_type][type_id] == 0 {
-            return false;
-        }
-
-        self.available[rs_type][type_id]      -= 1;
-        self.allocation[rs_type][tid][type_id] += 1;
-
-        let safe = self.detect_deadlock(rs_type);
-        if safe {
-            true
-        } else {
-            // 回滚
-            self.available[rs_type][type_id]+= 1;
-            self.allocation[rs_type][tid][type_id]-= 1;
-            self.need[rs_type][tid][type_id] += 1;
-            false
-        } 
+    /// add need
+    pub fn add_need(&mut self, rs_type: usize,tid: usize,type_id:usize){
+        self.need[rs_type][tid][type_id] += 1;
+    }
+    /// sub need
+    pub fn sub_need(&mut self, rs_type: usize,tid: usize,type_id:usize){
+        self.need[rs_type][tid][type_id] -= 1;
+    }
+    /// alloc_recource
+    pub fn alloc_recource(&mut self, rs_type: usize,tid: usize,type_id:usize) {          
+       self.available[rs_type][type_id]-= 1;
+       self.allocation[rs_type][tid][type_id]+= 1;
+       self.need[rs_type][tid][type_id] -= 1;
     }
 
     /// release detect_deadlock
-    pub fn release_deadlock(&mut self,rs_type: usize,tid: usize,type_id:usize){
-        if !self.enable_deadlock || self.allocation[rs_type][tid][type_id] == 0                  
-        {
-            return;
-        }
+    pub fn release_recource(&mut self,rs_type: usize,tid: usize,type_id:usize){
         if self.enable_deadlock{
             self.allocation[rs_type][tid][type_id]-=1;
             self.available[rs_type][type_id]+= 1;
@@ -143,7 +128,6 @@ impl ProcessControlBlockInner {
         let n = self.allocation[rs_type].len();
         let mut finish = vec![false; n];
 
-        debug!("self.allocation:{:?}self.available:{:?}self.need:{:?}",self.allocation,self.available,self.need);
 
         loop {
             let mut update = false;
@@ -174,8 +158,6 @@ impl ProcessControlBlockInner {
                 break;
             }
         }
-        debug!("Final state - allocation:{:?}, available:{:?}, need:{:?}, finish:{:?}",
-           self.allocation, self.available, self.need, finish);
         finish.iter().all(|&x|x)
     }
 }
@@ -345,10 +327,10 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    enable_deadlock: false,
-                    available :core::array::from_fn(|_| Vec::new()),
-                    allocation: core::array::from_fn(|_| Vec::new()),
-                    need: core::array::from_fn(|_| Vec::new()),
+                    enable_deadlock: parent.enable_deadlock,
+                    available :parent.available.clone(),
+                    allocation: parent.allocation.clone(),
+                    need:parent.need.clone(),
                 })
             },
         });

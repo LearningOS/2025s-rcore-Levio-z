@@ -82,14 +82,15 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     let mut process_inner = process.inner_exclusive_access();
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
-    if process_inner.enable_deadlock && !process_inner.try_alloc_deadlock(0, tid, mutex_id){
-        drop(process_inner);
-        drop(process);
+    process_inner.add_need(0, tid, mutex_id);
+    if process_inner.enable_deadlock && !process_inner.detect_deadlock(0){
+        process_inner.sub_need(0, tid, mutex_id);
         return DEADLOCK_DETECTED;
     }
     drop(process_inner);
     drop(process);
     mutex.lock();
+    current_process().inner_exclusive_access().alloc_recource(0,tid, mutex_id);
     0
 }
 /// mutex unlock syscall
@@ -109,7 +110,7 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
     let mut process_inner = process.inner_exclusive_access();
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
-    process_inner.release_deadlock(0, tid, mutex_id);
+    process_inner.release_recource(0,tid, mutex_id);
     drop(process_inner);
     drop(process);
     mutex.unlock();
@@ -173,7 +174,7 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
     let mut process_inner = process.inner_exclusive_access();
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
-    process_inner.release_deadlock(1, tid, sem_id);
+    process_inner.release_recource(1, tid, sem_id);
     drop(process_inner);
     drop(process);
     sem.up();
@@ -196,14 +197,15 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     let mut process_inner = process.inner_exclusive_access();
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
-    if process_inner.enable_deadlock && !process_inner.try_alloc_deadlock(1,tid, sem_id){
-        drop(process_inner);
-        drop(process);
+    process_inner.add_need(1, tid, sem_id);
+    if process_inner.enable_deadlock && !process_inner.detect_deadlock(1){
+        process_inner.sub_need(1, tid, sem_id);
         return DEADLOCK_DETECTED;
     }
     drop(process_inner);
     drop(process);
     sem.down();
+    current_process().inner_exclusive_access().alloc_recource(1,tid, sem_id);
     0
 }
 /// condvar create syscall
