@@ -78,10 +78,13 @@ impl ProcessControlBlockInner {
     pub fn alloc_tid(&mut self) -> usize {
         let len =self.task_res_allocator.alloc();
         if len+1 > self.allocation[0].len() {
-            self.allocation[0].push(vec![0; self.available[0].len()]);
-            self.need[0].push(vec![0; self.available[0].len()]);
-            self.allocation[1].push(vec![0; self.available[1].len()]);
-            self.need[1].push(vec![0; self.available[1].len()]);
+            for i in 0..2 {
+                // 每次扩容 8 个，按需增加
+                for _ in 0..8 {
+                    self.allocation[i].push(vec![0; self.available[i].len()]);
+                    self.need[i].push(vec![0; self.available[i].len()]);
+                }
+            }
         }
         len
     }
@@ -104,10 +107,10 @@ impl ProcessControlBlockInner {
     /// try alloc detect_deadlock
     pub fn try_alloc_deadlock(&mut self,rs_type: usize,tid: usize,type_id:usize) -> bool{
         self.need[rs_type][tid][type_id] += 1;
-        if self.detect_deadlock(rs_type,tid,type_id){
+        if  self.available[rs_type][type_id]>0 && self.detect_deadlock(rs_type,tid,type_id){
             self.allocation[rs_type][tid][type_id]+=1;
             self.available[rs_type][type_id]-=1;
-            self.need[rs_type][tid][type_id] -= 1;
+            self.need[rs_type][tid][type_id]-=1;
             return true;
         }
         false 
@@ -116,16 +119,23 @@ impl ProcessControlBlockInner {
     /// release detect_deadlock
     pub fn release_deadlock(&mut self,rs_type: usize,tid: usize,type_id:usize){
         if self.enable_deadlock{
-            self.allocation[rs_type][tid][type_id]-=1;
+            if self.allocation[rs_type][tid][type_id]>0{
+                self.allocation[rs_type][tid][type_id]-=1;
+            }
             self.available[rs_type][type_id]+=1;
         }
     }
     /// detect_deadlock
     pub fn detect_deadlock(&self,rs_type: usize,tid: usize,type_id:usize) -> bool{
         let mut available = self.available.clone();
-        let allocation = self.allocation.clone();
+        let mut allocation = self.allocation.clone();
         let mut need = self.need.clone();
-        need[rs_type][tid][type_id] += 1;
+        println!("available:{:?}-allocation:{:?}-need:{:?}",available,allocation,need);
+        println!("rs_type:{}-tid:{}-type_id:{}",rs_type,tid,type_id);
+        // 模拟分配
+        available[rs_type][type_id]-=1;
+        need[rs_type][tid][type_id]-=1;
+        allocation[rs_type][tid][type_id]+=1;
         let n = allocation[rs_type].len();
         let m = available[rs_type].len();
         let mut finish = vec![false; n];
@@ -134,8 +144,7 @@ impl ProcessControlBlockInner {
             for i in 0..n{
                 if !finish[i] && (0..m).all(|j|need[rs_type][i][j]<=available[rs_type][j]){
                     for j in 0..m{
-                        let avail = &mut available[rs_type][j];
-                        *avail += allocation[rs_type][i][j];
+                        available[rs_type][j]+= allocation[rs_type][i][j];
                     }
                     finish[i] = true;
                     update = true;
@@ -145,7 +154,7 @@ impl ProcessControlBlockInner {
                 break;
             }
         }
-        finish.iter().all(|&x|x==true)
+        finish.iter().all(|&x|x)
     }
 }
 

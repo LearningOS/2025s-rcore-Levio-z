@@ -56,7 +56,6 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
         process_inner.mutex_list.push(mutex);
         let id  = process_inner.mutex_list.len() as isize - 1;
         process_inner.available[0].push(1);
-        print!("yes available");
         process_inner.allocation[0]
             .iter_mut()
             .for_each(|v| v.push(0));
